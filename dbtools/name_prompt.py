@@ -1,13 +1,17 @@
 # -*- coding: utf-8 -*-
-
-import ipywidgets as widgets
+import re
 import webbrowser
+import ipywidgets as widgets
 import urllib.parse
+from pathlib import Path
+from icrawler.builtin import GoogleImageCrawler
+from PIL import Image
+ROOT_PATH = Path(__file__).parent.parent
 
 
 class NamePrompt:
     def __init__(
-            self, item, callback, guessed_name=None, name_proposals=None, similar_names=None):
+            self, item, callback, guessed_name=None, name_proposals=None, similar_names=None, manufacturers=None):
         """IPyWidgets UI element for setting name for a crawled headphone"""
         self._item = item
         self.callback = callback
@@ -15,6 +19,7 @@ class NamePrompt:
         self._guessed_name = self._guessed_name.strip()
         self._name_proposals = name_proposals if name_proposals is not None else []
         self._similar_names = similar_names if similar_names is not None else []
+        self._manufacturers = manufacturers
         # UI elements
         self.search_button = widgets.Button(description='🔎', layout=widgets.Layout(width='48px', height='44px'))
         self.search_button.on_click(self.handle_search)
@@ -25,6 +30,7 @@ class NamePrompt:
             btn = widgets.Button(description=form, layout=widgets.Layout(width='80px'))
             btn.on_click(self.handle_form_click)
             self.form_buttons.append(btn)
+        self._imgs = widgets.HBox([])
         self.widget = None
         self.reload_ui()
 
@@ -33,27 +39,20 @@ class NamePrompt:
             button.button_style = 'success' if button.description == self.item.form else (
                 'danger' if button.description == 'ignore' else 'warning')
         self.widget = widgets.VBox([
+            widgets.HTML(
+                value=f'<i style="text-align: center; display: inline-block; width: 100%; line-height: 1">'
+                      f'{urllib.parse.unquote(self.item.url) or self.item.source_name}</i>'),
+            *self._name_proposal_buttons,  # Name suggestions
+            widgets.HTML(
+                f'<h4 style="margin: 0; text-align: center; line-height: 1.7; font-size: 24px">{self.name}</h4>',
+            layout=widgets.Layout(width='400px')),
+            self.text_field,
+            widgets.HBox([*self.form_buttons]),
             widgets.HBox([
-                widgets.VBox([
-                    widgets.HTML(
-                        value=f'<h4 style="margin: 0;text-align: center; line-height: 1.7">{self.name}</h4>'
-                              f'<i style="text-align: center; display: inline-block; width: 100%; line-height: 1">'
-                              f'{urllib.parse.unquote(self.item.url) or self.item.source_name}</i>'),
-                ], layout=widgets.Layout(text_align='center', min_width='400px')),
+                widgets.Label(f'Measured on: {self.item.rig}'),
                 self.search_button
-            ], layout=widgets.Layout(width='600px')),
-            widgets.HBox([
-                widgets.VBox([
-                    *self._name_proposal_buttons,  # Name suggestions
-                    widgets.HBox([*self.form_buttons]),
-                    self.text_field,
-                    widgets.Label(f'Measured on: {self.item.rig}'),
-                ]),
-                widgets.HTML(
-                    '<div style="margin-left: 12px"><b>Naming convention</b><br />' +
-                    '<br>'.join(self.similar_names) + '</div>'
-                ),
             ]),
+            self._imgs
         ])
 
     @property
@@ -90,10 +89,11 @@ class NamePrompt:
             for item in name_proposals.items:
                 btn = widgets.Button(
                     description=f'{item.name}',
-                    button_style='success' if self.guessed_name and item.name.lower() == self.guessed_name.lower() else 'primary',
+                    button_style='success' if self.guessed_name and item.name.lower() == self._manufacturers.replace(self.guessed_name).lower() else 'primary',
                     layout=widgets.Layout(width='400px'))
                 btn.on_click(self.handle_name_proposal_click)
                 self._name_proposal_buttons.append(btn)
+            self._name_proposal_buttons = self._name_proposal_buttons[::-1]
             self.reload_ui()
 
     @property
@@ -110,10 +110,32 @@ class NamePrompt:
     def name(self):
         return self.guessed_name or urllib.parse.unquote(self.item.url.split('/')[-1])
 
+    def create_query(self):
+        return re.sub(r'\s\(.*\)$', '', self.text_field.value).strip()
+
     def handle_search(self, btn):
-        quoted = urllib.parse.quote_plus(self.name)
+        self.reload_ui()
+        quoted = urllib.parse.quote_plus(self.create_query())
         url = f'https://google.com/search?q={quoted}&tbm=isch'
         webbrowser.open(url)
+        self.search_images()
+
+    def search_images(self):
+        if not self.text_field.value:
+            return
+        img_dir = ROOT_PATH.joinpath(
+            'dbtools', 'google-image-search', self.create_query())
+        if not img_dir.exists():
+            google_crawler = GoogleImageCrawler(storage={'root_dir': img_dir})
+            google_crawler.crawl(keyword=img_dir.name, max_num=4)
+        # Create image widgets
+        images = []
+        for fp in img_dir.glob('*'):
+            with open(fp, 'rb') as fh:
+                im = Image.open(fp)
+                xsize, ysize = im.size
+                images.append(widgets.Image(value=fh.read(), width=200 * xsize / ysize, height=200))
+        self._imgs.children = images
 
     def handle_name_proposal_click(self, btn):
         btn.button_style = 'success'

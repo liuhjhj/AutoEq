@@ -57,9 +57,32 @@ class CrinacleCrawlerBase(Crawler, ABC):
                             book[file_name.strip()] = f'{manufacturer_name} {model["name"]}'
         return book
 
-    @staticmethod
-    def normalize_file_name(file_name):
-        file_name = urllib.parse.unquote(file_name)
+    def url_to_source_name(self, url):
+        source_name = urllib.parse.unquote(url)
+        source_name = re.sub(r' [LR]\d?\.txt$', '', source_name)
+        source_name = re.sub(r'\.txt$', '', source_name)
+        return source_name
+
+    def normalize_file_name(self, file_name):
+        """Normalizes file name and removes phohibited characters
+        < (less than)
+        > (greater than)
+        : (colon - sometimes works, but is actually NTFS Alternate Data Streams)
+        " (double quote)
+        / (forward slash)
+        \ (backslash)
+        | (vertical bar or pipe)
+        ? (question mark)
+        * (asterisk)
+        Args:
+            file_name:
+
+        Returns:
+
+        """
+        if file_name is None:
+            return file_name
+        file_name = super().normalize_file_name(file_name)
         file_name = re.sub(r' [LR]\d?\.txt$', '', file_name)
         file_name = re.sub(r'\.txt$', '', file_name)
         return file_name
